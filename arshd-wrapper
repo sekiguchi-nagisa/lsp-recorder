@@ -1,0 +1,4 @@
+#!/usr/bin/env arsh
+
+cd $SCRIPT_DIR
+./lsp-recorder -- arshd $@

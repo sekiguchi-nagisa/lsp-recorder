@@ -8,9 +8,10 @@ import (
 )
 
 var CLI struct {
-	Bin     string   `short:"b" required:"" help:"Specify language server executable"`
 	Version bool     `short:"v" help:"Show version info"`
-	Args    []string `arg:"" optional:"" help:"additional options/arguments for language server"`
+	Log     string   `default:"./lsp-recorder.log" help:"Log file path"`
+	Bin     string   `arg:"" required:"" help:"Language Server executable path"`
+	Args    []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
 }
 
 var version = "" // for version embedding (specified like "-X main.version=v0.1.0")
@@ -41,4 +42,15 @@ func main() {
 		fmt.Println(getVersion())
 		os.Exit(0)
 	}
+
+	logFile, err := os.Create(CLI.Log)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "cannot open log file: %s, caused by %s\n", CLI.Log, err.Error())
+		os.Exit(1)
+	}
+	defer func(logFile *os.File) {
+		_ = logFile.Close()
+	}(logFile)
+
+	Run(CLI.Bin, CLI.Args, logFile)
 }
