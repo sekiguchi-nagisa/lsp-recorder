@@ -9,7 +9,7 @@ import (
 
 var CLI struct {
 	Version bool     `short:"v" help:"Show version info"`
-	Log     string   `default:"./lsp-recorder.log" help:"Log file path"`
+	Log     string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
 	Bin     string   `arg:"" required:"" help:"Language Server executable path"`
 	Args    []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
 }

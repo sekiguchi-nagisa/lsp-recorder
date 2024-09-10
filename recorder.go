@@ -105,7 +105,7 @@ func formatEnv() string {
 }
 
 func Run(name string, args []string, logWriter io.Writer) {
-	ch := make(chan LogData)
+	ch := make(chan LogData, 32)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go record(ctx, ch, logWriter)

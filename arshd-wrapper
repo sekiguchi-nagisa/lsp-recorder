@@ -1,4 +1,9 @@
 #!/usr/bin/env arsh
 
+shctl set errraise
+
+printf -v var "arshd_%(%Y-%m-%dT%H:%M:%S%z)T.log"
+var name = $reply.remove('var')!
+
 cd $SCRIPT_DIR
-./lsp-recorder -- arshd $@
+exec ./lsp-recorder --log=$name -- arshd $@
