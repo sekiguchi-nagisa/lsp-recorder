@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,9 +38,9 @@ func toString(t StreamType) string {
 type PayloadType int
 
 const (
-	JSON PayloadType = iota
+	INVALID PayloadType = iota // for invalid LSP message
+	JSON
 	RAW
-	STRING
 )
 
 type LogData struct {
@@ -52,9 +56,24 @@ func record(ctx context.Context, ch <-chan LogData, writer io.Writer) {
 		case <-ctx.Done():
 			return
 		case v := <-ch:
-			_, _ = fmt.Fprintf(writer, "%s %s ", v.timestamp.Format(time.RFC3339), toString(v.streamType))
-			_, _ = writer.Write(v.payload) //FIXME: parse payload
-			_, _ = writer.Write([]byte("\n"))
+			_, _ = fmt.Fprintf(writer, "%s %s", v.timestamp.Format(time.RFC3339Nano), toString(v.streamType))
+			if v.payloadType != JSON {
+				_, _ = writer.Write([]byte(" "))
+				_, _ = writer.Write(v.payload)
+				_, _ = writer.Write([]byte("\n"))
+			} else {
+				buf := bytes.Buffer{}
+				buf.Grow(len(v.payload) * 2)
+				if json.Indent(&buf, v.payload, "", "  ") != nil {
+					_, _ = fmt.Fprintf(writer, "invalid json payload\n")
+					_, _ = writer.Write(v.payload)
+					_, _ = writer.Write([]byte("\n"))
+				} else {
+					_, _ = writer.Write([]byte("\n"))
+					_, _ = writer.Write(buf.Bytes())
+					_, _ = writer.Write([]byte("\n"))
+				}
+			}
 		}
 	}
 }
@@ -63,7 +82,7 @@ func sendMessage(t StreamType, value string, ch chan<- LogData) {
 	ch <- LogData{
 		timestamp:   time.Now(),
 		streamType:  t,
-		payloadType: STRING,
+		payloadType: RAW,
 		payload:     []byte(value),
 	}
 }
@@ -73,21 +92,98 @@ func logError(value string, ch chan<- LogData) {
 	_, _ = os.Stderr.WriteString(value)
 }
 
+func parseContentHeader(buffer *bytes.Buffer) (int, error) {
+	s := strings.Builder{}
+	s.Grow(32)
+	for _, b := range []byte("Content-Length: ") {
+		r, e := buffer.ReadByte()
+		s.WriteByte(r)
+		if r != b || e != nil {
+			return -1, fmt.Errorf("invalid message header: '%s'", buffer.String())
+		}
+	}
+
+	s.Reset()
+	for {
+		r, e := buffer.ReadByte()
+		if e != nil {
+			return -1, errors.New("content length must be end with \\r\\n\\r\\n")
+		}
+		if r == '\r' {
+			break
+		}
+		s.WriteByte(r)
+	}
+	for _, b := range []byte("\n\r\n") {
+		if r, e := buffer.ReadByte(); e != nil || r != b {
+			return -1, errors.New("content length must be end with \\r\\n\\r\\n")
+		}
+	}
+	n, e := strconv.Atoi(s.String())
+	if e != nil {
+		return -1, e
+	}
+	if n <= 0 {
+		return -1, errors.New("content length must be greater than 0")
+	}
+	return n, nil
+}
+
 func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Writer, ch chan<- LogData) {
+	buf := bytes.Buffer{}
+	buf.Grow(2048)
+	requiredPayloadLen := -1
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		data := make([]byte, 1024)
-		n, _ := reader.Read(data)     //FIXME: read error handling
-		n, _ = writer.Write(data[:n]) //FIXME: write error handling
-		ch <- LogData{                //FIXME: parse json
+		tmp := make([]byte, 1024)
+		n, _ := reader.Read(tmp) //FIXME: read error handling
+		if n == 0 {
+			continue // skip empty data
+		}
+		n, _ = writer.Write(tmp[:n]) //FIXME: write error handling
+
+		if t == STDERR {
+			ch <- LogData{
+				timestamp:   time.Now(),
+				streamType:  t,
+				payloadType: RAW,
+				payload:     tmp[:n],
+			}
+			continue
+		}
+
+		// extract message payload
+		buf.Write(tmp[:n])
+		if requiredPayloadLen < 0 {
+			num, err := parseContentHeader(&buf)
+			if err != nil {
+				ch <- LogData{
+					timestamp:   time.Now(),
+					streamType:  t,
+					payloadType: INVALID,
+					payload:     []byte(err.Error()),
+				}
+				continue
+			}
+			requiredPayloadLen = num
+		}
+
+		if buf.Len() < requiredPayloadLen {
+			continue
+		}
+
+		payload := make([]byte, requiredPayloadLen)
+		_, _ = buf.Read(payload)
+		requiredPayloadLen = -1
+		ch <- LogData{
 			timestamp:   time.Now(),
 			streamType:  t,
-			payloadType: RAW,
-			payload:     data[:n],
+			payloadType: JSON,
+			payload:     payload,
 		}
 	}
 }
