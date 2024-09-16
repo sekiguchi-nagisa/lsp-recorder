@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -210,9 +211,18 @@ func Run(name string, args []string, logWriter io.Writer) {
 	sendMessage(STDERR, formatEnv(), ch)
 
 	cmd := exec.Command(name, args...)
-	stdinPipe, _ := cmd.StdinPipe()   //FIXME: check error
-	stdoutPipe, _ := cmd.StdoutPipe() //FIXME
-	stderrPipe, _ := cmd.StderrPipe() //FIXME
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		log.Fatalln(fmt.Errorf("failed to open stdin pipe: %v", err))
+	}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalln(fmt.Errorf("failed to open stdout pipe: %v", err))
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalln(fmt.Errorf("failed to open stderr pipe: %v", err))
+	}
 	defer func() {
 		_ = stdinPipe.Close()
 		_ = stdoutPipe.Close()
@@ -221,11 +231,14 @@ func Run(name string, args []string, logWriter io.Writer) {
 	go intercept(ctx, STDIN, os.Stdin, stdinPipe, ch)
 	go intercept(ctx, STDOUT, stdoutPipe, os.Stdout, ch)
 	go intercept(ctx, STDERR, stderrPipe, os.Stderr, ch)
-	err := cmd.Start()
-	if err == nil {
-		err = cmd.Wait()
-	}
+	err = cmd.Start()
 	if err != nil {
-		go logError(err.Error(), ch) //FIXME: more precise error message
+		logError(fmt.Errorf("failed to start command: %v", err).Error(), ch)
+		return
 	}
+	if err := cmd.Wait(); err != nil {
+		logError(fmt.Errorf("failed to wait command: %v", err).Error(), ch)
+	}
+	sendMessage(STDERR, fmt.Sprintf("command exited with: %d", cmd.ProcessState.ExitCode()), ch)
+	time.Sleep(100 * time.Millisecond)
 }
