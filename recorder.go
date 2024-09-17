@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -88,7 +87,8 @@ func sendMessage(t StreamType, value string, ch chan<- LogData) {
 	}
 }
 
-func logError(value string, ch chan<- LogData) {
+func logError(err error, ch chan<- LogData) {
+	value := err.Error()
 	sendMessage(STDERR, value, ch)
 	_, _ = os.Stderr.WriteString(value)
 }
@@ -204,7 +204,10 @@ func formatEnv() string {
 func Run(name string, args []string, logWriter io.Writer) {
 	ch := make(chan LogData, 32)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
 	go record(ctx, ch, logWriter)
 
 	sendMessage(STDERR, fmt.Sprintf("run: %s %s", name, args), ch)
@@ -213,15 +216,18 @@ func Run(name string, args []string, logWriter io.Writer) {
 	cmd := exec.Command(name, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		log.Fatalln(fmt.Errorf("failed to open stdin pipe: %v", err))
+		logError(fmt.Errorf("failed to open stdin pipe: %v", err), ch)
+		return
 	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Fatalln(fmt.Errorf("failed to open stdout pipe: %v", err))
+		logError(fmt.Errorf("failed to open stdout pipe: %v", err), ch)
+		return
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		log.Fatalln(fmt.Errorf("failed to open stderr pipe: %v", err))
+		logError(fmt.Errorf("failed to open stderr pipe: %v", err), ch)
+		return
 	}
 	defer func() {
 		_ = stdinPipe.Close()
@@ -233,12 +239,12 @@ func Run(name string, args []string, logWriter io.Writer) {
 	go intercept(ctx, STDERR, stderrPipe, os.Stderr, ch)
 	err = cmd.Start()
 	if err != nil {
-		logError(fmt.Errorf("failed to start command: %v", err).Error(), ch)
+		logError(fmt.Errorf("failed to start command: %v", err), ch)
 		return
 	}
 	if err := cmd.Wait(); err != nil {
-		logError(fmt.Errorf("failed to wait command: %v", err).Error(), ch)
+		logError(fmt.Errorf("failed to wait command: %v", err), ch)
+		return
 	}
 	sendMessage(STDERR, fmt.Sprintf("command exited with: %d", cmd.ProcessState.ExitCode()), ch)
-	time.Sleep(100 * time.Millisecond)
 }
