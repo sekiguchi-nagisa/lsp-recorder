@@ -93,44 +93,99 @@ func logError(err error, ch chan<- LogData) {
 	_, _ = os.Stderr.WriteString(value)
 }
 
-func parseContentHeader(buffer *bytes.Buffer) (int, error) {
-	s := strings.Builder{}
-	s.Grow(32)
-	for _, b := range []byte("Content-Length: ") {
-		r, e := buffer.ReadByte()
-		s.WriteByte(r)
-		if r != b || e != nil {
-			return -1, fmt.Errorf("invalid message header: '%s'", buffer.String())
-		}
-	}
+type ContentHeaderParserState int
 
-	s.Reset()
-	for {
-		r, e := buffer.ReadByte()
+const (
+	INITIAL ContentHeaderParserState = iota
+	IN_HEADER
+	IN_LENGTH
+	IN_NEWLINES
+)
+
+type ContentHeaderParser struct {
+	state ContentHeaderParserState
+	pos   int
+	sb    strings.Builder
+}
+
+func NewContentHeaderParser() *ContentHeaderParser {
+	c := ContentHeaderParser{}
+	c.reset()
+	return &c
+}
+
+func (p *ContentHeaderParser) reset() {
+	p.state = INITIAL
+	p.pos = 0
+	p.sb.Reset()
+}
+
+func (p *ContentHeaderParser) Parse(buffer *bytes.Buffer) (int, error) {
+START:
+	switch p.state {
+	case INITIAL, IN_HEADER:
+		p.state = IN_HEADER
+		header := []byte("Content-Length: ")
+		for ; p.pos < len(header); p.pos++ {
+			r, e := buffer.ReadByte()
+			p.sb.WriteByte(r)
+			if e != nil && errors.Is(e, io.EOF) {
+				return -1, e // suspend
+			}
+			if r != header[p.pos] || e != nil {
+				p.reset()
+				return -1, fmt.Errorf("invalid message header: '%s'", buffer.String())
+			}
+		}
+		p.state = IN_LENGTH
+		p.pos = 0
+		p.sb.Reset()
+		goto START
+	case IN_LENGTH:
+		for {
+			r, e := buffer.ReadByte()
+			if e != nil {
+				if errors.Is(e, io.EOF) {
+					return -1, e // suspend
+				}
+				p.reset()
+				return -1, errors.New("content length must be end with \\r\\n\\r\\n")
+			}
+			if r == '\r' {
+				break
+			}
+			p.sb.WriteByte(r)
+		}
+		p.state = IN_NEWLINES
+		p.pos = 0
+		goto START
+	case IN_NEWLINES:
+		newlines := []byte("\n\r\n")
+		for ; p.pos < len(newlines); p.pos++ {
+			if r, e := buffer.ReadByte(); e != nil || r != newlines[p.pos] {
+				if e != nil && errors.Is(e, io.EOF) {
+					return -1, e // suspend
+				}
+				p.reset()
+				return -1, errors.New("content length must be end with \\r\\n\\r\\n")
+			}
+		}
+		n, e := strconv.Atoi(p.sb.String())
+		p.reset()
 		if e != nil {
-			return -1, errors.New("content length must be end with \\r\\n\\r\\n")
+			return -1, e
 		}
-		if r == '\r' {
-			break
+		if n <= 0 {
+			return -1, errors.New("content length must be greater than 0")
 		}
-		s.WriteByte(r)
+		return n, nil
 	}
-	for _, b := range []byte("\n\r\n") {
-		if r, e := buffer.ReadByte(); e != nil || r != b {
-			return -1, errors.New("content length must be end with \\r\\n\\r\\n")
-		}
-	}
-	n, e := strconv.Atoi(s.String())
-	if e != nil {
-		return -1, e
-	}
-	if n <= 0 {
-		return -1, errors.New("content length must be greater than 0")
-	}
-	return n, nil
+	p.reset()
+	return -1, io.EOF
 }
 
 func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Writer, ch chan<- LogData) {
+	chParser := NewContentHeaderParser()
 	buf := bytes.Buffer{}
 	buf.Grow(2048)
 	requiredPayloadLen := -1
@@ -160,13 +215,15 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 		// extract message payload
 		buf.Write(tmp[:n])
 		if requiredPayloadLen < 0 {
-			num, err := parseContentHeader(&buf)
+			num, err := chParser.Parse(&buf)
 			if err != nil {
-				ch <- LogData{
-					timestamp:   time.Now(),
-					streamType:  t,
-					payloadType: INVALID,
-					payload:     []byte(err.Error()),
+				if err != io.EOF {
+					ch <- LogData{
+						timestamp:   time.Now(),
+						streamType:  t,
+						payloadType: INVALID,
+						payload:     []byte(err.Error()),
+					}
 				}
 				continue
 			}
