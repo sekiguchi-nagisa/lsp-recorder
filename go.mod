@@ -3,8 +3,8 @@ module github.com/sekiguchi-nagisa/lsp-recorder
 go 1.22.1
 
 require (
-	github.com/alecthomas/kong v1.4.0
-	github.com/stretchr/testify v1.9.0
+	github.com/alecthomas/kong v1.5.0
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
