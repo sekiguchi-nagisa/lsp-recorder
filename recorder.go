@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -22,8 +22,8 @@ const (
 	STDERR
 )
 
-func toString(t StreamType) string {
-	switch t {
+func (s StreamType) String() string {
+	switch s {
 	case STDIN:
 		return "<stdin>"
 	case STDOUT:
@@ -43,6 +43,19 @@ const (
 	RAW
 )
 
+func (t PayloadType) String() string {
+	switch t {
+	case INVALID:
+		return "invalid"
+	case JSON:
+		return "json"
+	case RAW:
+		return "raw"
+	default:
+		return ""
+	}
+}
+
 type LogData struct {
 	timestamp   time.Time
 	streamType  StreamType
@@ -50,30 +63,14 @@ type LogData struct {
 	payload     []byte
 }
 
-func record(ctx context.Context, ch <-chan LogData, writer io.Writer) {
+func record(ctx context.Context, ch <-chan LogData, logger *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case v := <-ch:
-			_, _ = fmt.Fprintf(writer, "%s %s", v.timestamp.Format(time.RFC3339Nano), toString(v.streamType))
-			if v.payloadType != JSON {
-				_, _ = writer.Write([]byte(" "))
-				_, _ = writer.Write(v.payload)
-				_, _ = writer.Write([]byte("\n"))
-			} else {
-				buf := bytes.Buffer{}
-				buf.Grow(len(v.payload) * 2)
-				if json.Indent(&buf, v.payload, "", "  ") != nil {
-					_, _ = fmt.Fprintf(writer, "invalid json payload\n")
-					_, _ = writer.Write(v.payload)
-					_, _ = writer.Write([]byte("\n"))
-				} else {
-					_, _ = writer.Write([]byte("\n"))
-					_, _ = writer.Write(buf.Bytes())
-					_, _ = writer.Write([]byte("\n"))
-				}
-			}
+			logger.Info(string(v.payload), "timestamp", v.timestamp.Format(time.RFC3339Nano),
+				"type", v.streamType.String(), "payload", v.payloadType.String())
 		}
 	}
 }
@@ -258,14 +255,14 @@ func formatEnv() string {
 	return sb.String()
 }
 
-func Run(name string, args []string, logWriter io.Writer) {
+func Run(name string, args []string, logger *slog.Logger) {
 	ch := make(chan LogData, 32)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
-	go record(ctx, ch, logWriter)
+	go record(ctx, ch, logger)
 
 	sendMessage(STDERR, fmt.Sprintf("run: %s %s", name, args), ch)
 	sendMessage(STDERR, formatEnv(), ch)

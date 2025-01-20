@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/alecthomas/kong"
+	"log/slog"
 	"os"
 	"runtime/debug"
 )
@@ -10,6 +11,7 @@ import (
 var CLI struct {
 	Version bool     `short:"v" help:"Show version info"`
 	Log     string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
+	Format  string   `optional:"" enum:"text,json" default:"text" help:"Log file format"`
 	Bin     string   `arg:"" required:"" help:"Language Server executable path"`
 	Args    []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
 }
@@ -52,5 +54,14 @@ func main() {
 		_ = logFile.Close()
 	}(logFile)
 
-	Run(CLI.Bin, CLI.Args, logFile)
+	var handler slog.Handler
+	switch CLI.Format {
+	case "text":
+		handler = slog.NewTextHandler(logFile, nil)
+	case "json":
+		handler = slog.NewJSONHandler(logFile, nil)
+	default:
+		panic("unknown format: " + CLI.Format)
+	}
+	Run(CLI.Bin, CLI.Args, slog.New(handler))
 }
