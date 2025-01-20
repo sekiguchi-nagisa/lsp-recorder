@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/alecthomas/kong"
+	recorder "github.com/sekiguchi-nagisa/lsp-recorder"
 	"log/slog"
 	"os"
 	"runtime/debug"
@@ -63,5 +64,5 @@ func main() {
 	default:
 		panic("unknown format: " + CLI.Format)
 	}
-	Run(CLI.Bin, CLI.Args, slog.New(handler))
+	recorder.Run(CLI.Bin, CLI.Args, slog.New(handler))
 }
