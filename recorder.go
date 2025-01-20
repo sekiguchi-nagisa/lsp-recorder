@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -90,9 +92,9 @@ func sendMessage(t StreamType, p PayloadType, value string, ch chan<- LogData) {
 	}
 }
 
-func logError(err error, ch chan<- LogData) {
+func logError(logger *slog.Logger, err error) {
+	logger.Error(err.Error(), "type", STDERR.String(), "payload", RAW_END.String())
 	value := err.Error()
-	sendMessage(STDERR, RAW, value, ch)
 	_, _ = os.Stderr.WriteString(value)
 }
 
@@ -263,10 +265,10 @@ func formatEnv() string {
 
 func Run(name string, args []string, logger *slog.Logger) {
 	ch := make(chan LogData, 32)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer func() {
 		time.Sleep(100 * time.Millisecond)
-		cancel()
+		stop()
 	}()
 	go record(ctx, ch, logger)
 
@@ -276,17 +278,17 @@ func Run(name string, args []string, logger *slog.Logger) {
 	cmd := exec.Command(name, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		logError(fmt.Errorf("failed to open stdin pipe: %v", err), ch)
+		logError(logger, fmt.Errorf("failed to open stdin pipe: %v", err))
 		return
 	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		logError(fmt.Errorf("failed to open stdout pipe: %v", err), ch)
+		logError(logger, fmt.Errorf("failed to open stdout pipe: %v", err))
 		return
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		logError(fmt.Errorf("failed to open stderr pipe: %v", err), ch)
+		logError(logger, fmt.Errorf("failed to open stderr pipe: %v", err))
 		return
 	}
 	defer func() {
@@ -299,11 +301,11 @@ func Run(name string, args []string, logger *slog.Logger) {
 	go intercept(ctx, STDERR, stderrPipe, os.Stderr, ch)
 	err = cmd.Start()
 	if err != nil {
-		logError(fmt.Errorf("failed to start command: %v", err), ch)
+		logError(logger, fmt.Errorf("failed to start command: %v", err))
 		return
 	}
 	if err := cmd.Wait(); err != nil {
-		logError(fmt.Errorf("failed to wait command: %v", err), ch)
+		logError(logger, fmt.Errorf("failed to wait command: %v", err))
 		return
 	}
 	sendMessage(STDERR, RAW_END, fmt.Sprintf("command exited with: %d", cmd.ProcessState.ExitCode()), ch)
