@@ -41,6 +41,8 @@ const (
 	INVALID PayloadType = iota // for invalid LSP message
 	JSON
 	RAW
+	RAW_START
+	RAW_END
 )
 
 func (t PayloadType) String() string {
@@ -51,6 +53,10 @@ func (t PayloadType) String() string {
 		return "json"
 	case RAW:
 		return "raw"
+	case RAW_START:
+		return "start"
+	case RAW_END:
+		return "end"
 	default:
 		return ""
 	}
@@ -75,18 +81,18 @@ func record(ctx context.Context, ch <-chan LogData, logger *slog.Logger) {
 	}
 }
 
-func sendMessage(t StreamType, value string, ch chan<- LogData) {
+func sendMessage(t StreamType, p PayloadType, value string, ch chan<- LogData) {
 	ch <- LogData{
 		timestamp:   time.Now(),
 		streamType:  t,
-		payloadType: RAW,
+		payloadType: p,
 		payload:     []byte(value),
 	}
 }
 
 func logError(err error, ch chan<- LogData) {
 	value := err.Error()
-	sendMessage(STDERR, value, ch)
+	sendMessage(STDERR, RAW, value, ch)
 	_, _ = os.Stderr.WriteString(value)
 }
 
@@ -264,8 +270,8 @@ func Run(name string, args []string, logger *slog.Logger) {
 	}()
 	go record(ctx, ch, logger)
 
-	sendMessage(STDERR, fmt.Sprintf("run: %s %s", name, args), ch)
-	sendMessage(STDERR, formatEnv(), ch)
+	sendMessage(STDERR, RAW_START, fmt.Sprintf("run: %s %s", name, args), ch)
+	sendMessage(STDERR, RAW, formatEnv(), ch)
 
 	cmd := exec.Command(name, args...)
 	stdinPipe, err := cmd.StdinPipe()
@@ -300,5 +306,5 @@ func Run(name string, args []string, logger *slog.Logger) {
 		logError(fmt.Errorf("failed to wait command: %v", err), ch)
 		return
 	}
-	sendMessage(STDERR, fmt.Sprintf("command exited with: %d", cmd.ProcessState.ExitCode()), ch)
+	sendMessage(STDERR, RAW_END, fmt.Sprintf("command exited with: %d", cmd.ProcessState.ExitCode()), ch)
 }
