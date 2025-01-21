@@ -6,4 +6,4 @@ printf -v var "arshd_%(%Y-%m-%dT%H:%M:%S%z)T.log"
 var name = $reply.remove('var')!
 
 cd $SCRIPT_DIR
-exec ./lsp-recorder --format=json --log=$name -- arshd $@
+exec ./lsp-recorder record --format=json --log=$name -- arshd $@

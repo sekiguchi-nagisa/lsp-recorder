@@ -9,11 +9,14 @@ import (
 )
 
 var CLI struct {
-	Version bool     `short:"v" help:"Show version info"`
-	Log     string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
-	Format  string   `optional:"" enum:"text,json" default:"text" help:"Log file format"`
-	Bin     string   `arg:"" required:"" help:"Language Server executable path"`
-	Args    []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
+	Record struct {
+		Log    string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
+		Format string   `optional:"" enum:"text,json" default:"text" help:"Log file format"`
+		Bin    string   `arg:"" required:"" help:"Language Server executable path"`
+		Args   []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
+	} `cmd:"" help:"Run and record Language Server"`
+
+	Version kong.VersionFlag `short:"v" help:"Show version information"`
 }
 
 var version = "" // for version embedding (specified like "-X main.version=v0.1.0")
@@ -39,29 +42,29 @@ func getVersion() string {
 }
 
 func main() {
-	kong.Parse(&CLI, kong.UsageOnError())
-	if CLI.Version {
-		fmt.Println(getVersion())
-		os.Exit(0)
-	}
+	ctx := kong.Parse(&CLI, kong.UsageOnError(), kong.Vars{"version": getVersion()})
+	switch ctx.Command() {
+	case "record <bin>":
+		logFile, err := os.Create(CLI.Record.Log)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "cannot open log file: %s, caused by %s\n", CLI.Record.Log, err.Error())
+			os.Exit(1)
+		}
+		defer func(logFile *os.File) {
+			_ = logFile.Close()
+		}(logFile)
 
-	logFile, err := os.Create(CLI.Log)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "cannot open log file: %s, caused by %s\n", CLI.Log, err.Error())
-		os.Exit(1)
-	}
-	defer func(logFile *os.File) {
-		_ = logFile.Close()
-	}(logFile)
-
-	var handler slog.Handler
-	switch CLI.Format {
-	case "text":
-		handler = slog.NewTextHandler(logFile, nil)
-	case "json":
-		handler = slog.NewJSONHandler(logFile, nil)
+		var handler slog.Handler
+		switch CLI.Record.Format {
+		case "text":
+			handler = slog.NewTextHandler(logFile, nil)
+		case "json":
+			handler = slog.NewJSONHandler(logFile, nil)
+		default:
+			panic("unknown format: " + CLI.Record.Format)
+		}
+		Run(CLI.Record.Bin, CLI.Record.Args, slog.New(handler))
 	default:
-		panic("unknown format: " + CLI.Format)
+		panic("unknown command: " + ctx.Command())
 	}
-	Run(CLI.Bin, CLI.Args, slog.New(handler))
 }
