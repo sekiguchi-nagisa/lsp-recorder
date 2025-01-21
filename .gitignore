@@ -27,6 +27,5 @@ go.work.sum
 
 # executable
 lsp-recorder
-!cmd/lsp-recorder
 
 *.log
