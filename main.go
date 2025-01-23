@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/alecthomas/kong"
 	"log/slog"
@@ -15,6 +16,10 @@ var CLI struct {
 		Bin    string   `arg:"" required:"" help:"Language Server executable path"`
 		Args   []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
 	} `cmd:"" help:"Run and record Language Server"`
+
+	Print struct {
+		Log string `arg:"" required:"" help:"Log file path"`
+	} `cmd:"" help:"Pretty print log"`
 
 	Version kong.VersionFlag `short:"v" help:"Show version information"`
 }
@@ -64,6 +69,18 @@ func main() {
 			panic("unknown format: " + CLI.Record.Format)
 		}
 		Run(CLI.Record.Bin, CLI.Record.Args, slog.New(handler))
+	case "print <log>":
+		buf, err := os.ReadFile(CLI.Print.Log)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "cannot open log file: %s, caused by %s\n", CLI.Print.Log, err.Error())
+			os.Exit(1)
+		}
+		reader := bytes.NewReader(buf)
+		err = Print(reader, os.Stdout)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "cannot print log: %s, caused by %s\n", CLI.Print.Log, err.Error())
+			os.Exit(1)
+		}
 	default:
 		panic("unknown command: " + ctx.Command())
 	}

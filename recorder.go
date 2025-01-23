@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +38,20 @@ func (s StreamType) String() string {
 	}
 }
 
+func (s *StreamType) UnmarshalJSON(i []byte) error {
+	switch string(i) {
+	case `"<stdin>"`:
+		*s = STDIN
+	case `"<stdout>"`:
+		*s = STDOUT
+	case `"<stderr>"`:
+		*s = STDERR
+	default:
+		return errors.New("invalid stream type: " + string(i))
+	}
+	return nil
+}
+
 type PayloadType int
 
 const (
@@ -64,11 +79,51 @@ func (t PayloadType) String() string {
 	}
 }
 
+func (t *PayloadType) UnmarshalJSON(i []byte) error {
+	switch string(i) {
+	case `"invalid"`:
+		*t = INVALID
+	case `"json"`:
+		*t = JSON
+	case `"raw"`:
+		*t = RAW
+	case `"start"`:
+		*t = RAW_START
+	case `"end"`:
+		*t = RAW_END
+	default:
+		return errors.New("invalid payload type: " + string(i))
+	}
+	return nil
+}
+
 type LogData struct {
-	timestamp   time.Time
-	streamType  StreamType
-	payloadType PayloadType
-	payload     []byte
+	Timestamp   time.Time   `json:"timestamp"`
+	StreamType  StreamType  `json:"type"`
+	PayloadType PayloadType `json:"payload"`
+	Payload     string      `json:"msg"`
+}
+
+func (l *LogData) String() string {
+	builder := strings.Builder{}
+	builder.WriteString(l.Timestamp.Format("2006-01-02 15:04:05.000-07"))
+	builder.WriteString(" ")
+	builder.WriteString(l.StreamType.String())
+	builder.WriteString(" ")
+	builder.WriteString(l.PayloadType.String())
+	builder.WriteString(": ")
+	if l.PayloadType == JSON {
+		buf := bytes.NewBuffer(nil)
+		err := json.Indent(buf, []byte(l.Payload), "", "  ")
+		if err != nil {
+			return ""
+		}
+		builder.WriteString("\n")
+		builder.Write(buf.Bytes())
+	} else {
+		builder.WriteString(l.Payload)
+	}
+	return builder.String()
 }
 
 func record(ctx context.Context, ch <-chan LogData, logger *slog.Logger) {
@@ -77,18 +132,18 @@ func record(ctx context.Context, ch <-chan LogData, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case v := <-ch:
-			logger.Info(string(v.payload), "timestamp", v.timestamp.Format(time.RFC3339Nano),
-				"type", v.streamType.String(), "payload", v.payloadType.String())
+			logger.Info(string(v.Payload), "timestamp", v.Timestamp.Format(time.RFC3339Nano),
+				"type", v.StreamType.String(), "payload", v.PayloadType.String())
 		}
 	}
 }
 
 func sendMessage(t StreamType, p PayloadType, value string, ch chan<- LogData) {
 	ch <- LogData{
-		timestamp:   time.Now(),
-		streamType:  t,
-		payloadType: p,
-		payload:     []byte(value),
+		Timestamp:   time.Now(),
+		StreamType:  t,
+		PayloadType: p,
+		Payload:     value,
 	}
 }
 
@@ -209,10 +264,10 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 
 		if t == STDERR {
 			ch <- LogData{
-				timestamp:   time.Now(),
-				streamType:  t,
-				payloadType: RAW,
-				payload:     tmp[:n],
+				Timestamp:   time.Now(),
+				StreamType:  t,
+				PayloadType: RAW,
+				Payload:     string(tmp[:n]),
 			}
 			continue
 		}
@@ -224,10 +279,10 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 			if err != nil {
 				if err != io.EOF {
 					ch <- LogData{
-						timestamp:   time.Now(),
-						streamType:  t,
-						payloadType: INVALID,
-						payload:     []byte(err.Error()),
+						Timestamp:   time.Now(),
+						StreamType:  t,
+						PayloadType: INVALID,
+						Payload:     err.Error(),
 					}
 				}
 				continue
@@ -243,10 +298,10 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 		_, _ = buf.Read(payload)
 		requiredPayloadLen = -1
 		ch <- LogData{
-			timestamp:   time.Now(),
-			streamType:  t,
-			payloadType: JSON,
-			payload:     payload,
+			Timestamp:   time.Now(),
+			StreamType:  t,
+			PayloadType: JSON,
+			Payload:     string(payload),
 		}
 	}
 }
