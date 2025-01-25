@@ -9,17 +9,21 @@ import (
 	"runtime/debug"
 )
 
-var CLI struct {
-	Record struct {
-		Log    string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
-		Format string   `optional:"" enum:"text,json" default:"text" help:"Log file format"`
-		Bin    string   `arg:"" required:"" help:"Language Server executable path"`
-		Args   []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
-	} `cmd:"" help:"Run and record Language Server"`
+type CLIRecord struct {
+	Log    string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
+	Format string   `optional:"" enum:"text,json" default:"text" help:"Log file format"`
+	Bin    string   `arg:"" required:"" help:"Language Server executable path"`
+	Args   []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
+}
 
-	Print struct {
-		Log string `arg:"" required:"" help:"Log file path"`
-	} `cmd:"" help:"Pretty print log"`
+type CLIPrint struct {
+	Log string `arg:"" required:"" help:"Log file path"`
+}
+
+var CLI struct {
+	Record CLIRecord `cmd:"" help:"Run and record Language Server"`
+
+	Print CLIPrint `cmd:"" help:"Pretty print log"`
 
 	Version kong.VersionFlag `short:"v" help:"Show version information"`
 }
@@ -46,42 +50,46 @@ func getVersion() string {
 	}
 }
 
+func (r *CLIRecord) Run() error {
+	logFile, err := os.Create(r.Log)
+	if err != nil {
+		return fmt.Errorf("cannot open log file: %s, caused by %s\n", r.Log, err.Error())
+	}
+	defer func(logFile *os.File) {
+		_ = logFile.Close()
+	}(logFile)
+
+	var handler slog.Handler
+	switch r.Format {
+	case "text":
+		handler = slog.NewTextHandler(logFile, nil)
+	case "json":
+		handler = slog.NewJSONHandler(logFile, nil)
+	default:
+		panic("unknown format: " + r.Format)
+	}
+	Run(r.Bin, r.Args, slog.New(handler))
+	return nil
+}
+
+func (p *CLIPrint) Run() error {
+	buf, err := os.ReadFile(p.Log)
+	if err != nil {
+		return fmt.Errorf("cannot open log file: %s, caused by %s\n", p.Log, err.Error())
+	}
+	reader := bytes.NewReader(buf)
+	err = Print(reader, os.Stdout)
+	if err != nil {
+		return fmt.Errorf("cannot print log: %s, caused by %s\n", p.Log, err.Error())
+	}
+	return nil
+}
+
 func main() {
 	ctx := kong.Parse(&CLI, kong.UsageOnError(), kong.Vars{"version": getVersion()})
-	switch ctx.Command() {
-	case "record <bin>":
-		logFile, err := os.Create(CLI.Record.Log)
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "cannot open log file: %s, caused by %s\n", CLI.Record.Log, err.Error())
-			os.Exit(1)
-		}
-		defer func(logFile *os.File) {
-			_ = logFile.Close()
-		}(logFile)
-
-		var handler slog.Handler
-		switch CLI.Record.Format {
-		case "text":
-			handler = slog.NewTextHandler(logFile, nil)
-		case "json":
-			handler = slog.NewJSONHandler(logFile, nil)
-		default:
-			panic("unknown format: " + CLI.Record.Format)
-		}
-		Run(CLI.Record.Bin, CLI.Record.Args, slog.New(handler))
-	case "print <log>":
-		buf, err := os.ReadFile(CLI.Print.Log)
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "cannot open log file: %s, caused by %s\n", CLI.Print.Log, err.Error())
-			os.Exit(1)
-		}
-		reader := bytes.NewReader(buf)
-		err = Print(reader, os.Stdout)
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "cannot print log: %s, caused by %s\n", CLI.Print.Log, err.Error())
-			os.Exit(1)
-		}
-	default:
-		panic("unknown command: " + ctx.Command())
+	err := ctx.Run()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
 	}
 }
