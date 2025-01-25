@@ -1,0 +1,20 @@
+#!/usr/bin/env arsh
+
+[<CLI(toplevel:$true)>]
+type _Param() {
+    [<Option(required: $true, help: "specify language server executable path (default \`arshd\`)")>]
+    var bin = ""
+
+    [<Arg(help:"command line arguments of language server")>]
+    var args : [String]
+}
+
+record(p: _Param) {
+    shctl set errraise
+
+    printf -v var "${$p.bin.basename()}_%(%Y-%m-%dT%H:%M:%S%z)T.log"
+    var name = $reply.remove('var')!
+
+    cd $SCRIPT_DIR
+    exec ./lsp-recorder record --format=json --log=$name -- ${p.bin} ${p.args}
+}
