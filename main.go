@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"fmt"
 	"github.com/alecthomas/kong"
 	"log/slog"
@@ -73,11 +73,11 @@ func (r *CLIRecord) Run() error {
 }
 
 func (p *CLIPrint) Run() error {
-	buf, err := os.ReadFile(p.Log)
+	file, err := os.Open(p.Log)
 	if err != nil {
 		return fmt.Errorf("cannot open log file: %s, caused by %s\n", p.Log, err.Error())
 	}
-	reader := bytes.NewReader(buf)
+	reader := bufio.NewReader(file)
 	err = Print(reader, os.Stdout)
 	if err != nil {
 		return fmt.Errorf("cannot print log: %s, caused by %s\n", p.Log, err.Error())
