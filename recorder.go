@@ -132,7 +132,7 @@ func record(ctx context.Context, ch <-chan LogData, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case v := <-ch:
-			logger.Info(string(v.Payload), "timestamp", v.Timestamp.Format(time.RFC3339Nano),
+			logger.Info(v.Payload, "timestamp", v.Timestamp.Format(time.RFC3339Nano),
 				"type", v.StreamType.String(), "payload", v.PayloadType.String())
 		}
 	}
@@ -260,7 +260,6 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 		if n == 0 {
 			continue // skip empty data
 		}
-		n, _ = writer.Write(tmp[:n]) //FIXME: write error handling
 
 		if t == STDERR {
 			ch <- LogData{
@@ -269,6 +268,7 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 				PayloadType: RAW,
 				Payload:     string(tmp[:n]),
 			}
+			_, _ = writer.Write(tmp[:n]) //FIXME: write error handling
 			continue
 		}
 
@@ -284,6 +284,7 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 						PayloadType: INVALID,
 						Payload:     err.Error(),
 					}
+					_, _ = writer.Write(tmp[:n]) //FIXME: write error handling
 				}
 				continue
 			}
@@ -303,6 +304,8 @@ func intercept(ctx context.Context, t StreamType, reader io.Reader, writer io.Wr
 			PayloadType: JSON,
 			Payload:     string(payload),
 		}
+		_, _ = fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(payload))
+		_, _ = writer.Write(payload) //FIXME: write error handling
 	}
 }
 
