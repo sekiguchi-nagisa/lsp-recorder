@@ -12,7 +12,7 @@ type _Param() {
 record(p: _Param) {
     shctl set errraise
 
-    printf -v var "${$p.bin.basename()}_%(%Y-%m-%dT%H:%M:%S%z)T.log"
+    printf -v var "./log/${$p.bin.basename()}_%(%Y-%m-%dT%H:%M:%S%z)T.log"
     var name = $reply.remove('var')!
 
     cd $SCRIPT_DIR
