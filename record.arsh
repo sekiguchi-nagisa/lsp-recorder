@@ -12,9 +12,9 @@ type _Param() {
 record(p: _Param) {
     shctl set errraise
 
-    printf -v var "./log/${$p.bin.basename()}_%(%Y-%m-%dT%H:%M:%S%z)T.log"
+    printf -v var "./log/${$p.bin.basename()}_%(%Y-%m-%dT%H:%M:%S%z)T.json.gz"
     var name = $reply.remove('var')!
 
     cd $SCRIPT_DIR
-    exec ./lsp-recorder record --format=json --log=$name -- ${p.bin} ${p.args}
+    exec ./lsp-recorder record --format=json-gzip --log=$name -- ${p.bin} ${p.args}
 }

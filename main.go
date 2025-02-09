@@ -2,16 +2,19 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"fmt"
 	"github.com/alecthomas/kong"
+	"io"
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"strings"
 )
 
 type CLIRecord struct {
 	Log    string   `optional:"" default:"./lsp-recorder.log" help:"Log file path"`
-	Format string   `optional:"" enum:"text,json" default:"text" help:"Log file format"`
+	Format string   `optional:"" enum:"text,json,json-gzip" default:"text" help:"Log file format ('text' or 'json' or 'json-gzip')"`
 	Bin    string   `arg:"" required:"" help:"Language Server executable path"`
 	Args   []string `arg:"" optional:"" help:"Additional options/arguments of Language Server"`
 }
@@ -65,6 +68,12 @@ func (r *CLIRecord) Run() error {
 		handler = slog.NewTextHandler(logFile, nil)
 	case "json":
 		handler = slog.NewJSONHandler(logFile, nil)
+	case "json-gzip":
+		gzipWriter := gzip.NewWriter(logFile)
+		defer func(gzipWriter *gzip.Writer) {
+			_ = gzipWriter.Close()
+		}(gzipWriter)
+		handler = slog.NewJSONHandler(gzipWriter, nil)
 	default:
 		panic("unknown format: " + r.Format)
 	}
@@ -77,7 +86,23 @@ func (p *CLIPrint) Run() error {
 	if err != nil {
 		return fmt.Errorf("cannot open log file: %s, caused by %s\n", p.Log, err.Error())
 	}
-	reader := bufio.NewReader(file)
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
+
+	var reader io.Reader
+	if strings.HasSuffix(p.Log, ".gz") {
+		r, err := gzip.NewReader(file)
+		if err != nil {
+			return fmt.Errorf("cannot open log file: %s, caused by %s\n", p.Log, err.Error())
+		}
+		defer func(r *gzip.Reader) {
+			_ = r.Close()
+		}(r)
+		reader = r
+	} else {
+		reader = bufio.NewReader(file)
+	}
 	err = Print(reader, os.Stdout)
 	if err != nil {
 		return fmt.Errorf("cannot print log: %s, caused by %s\n", p.Log, err.Error())
