@@ -1,0 +1,11 @@
+#!/usr/bin/env arsh
+
+shctl set errraise
+
+cd $SCRIPT_DIR
+
+printf -v var "./log/arshd_%(%Y-%m-%dT%H:%M:%S%z)T.json.gz"
+test -d ./log || mkdir log
+var name = $reply.remove('var')!
+
+exec $SCRIPT_DIR/../lsp-recorder record --format=json-gzip --log=$name -- arshd $@
