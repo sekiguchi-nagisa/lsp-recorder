@@ -5,8 +5,8 @@ go 1.22
 toolchain go1.22.5
 
 require (
-	github.com/alecthomas/kong v1.11.0
-	github.com/stretchr/testify v1.10.0
+	github.com/alecthomas/kong v1.15.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (
